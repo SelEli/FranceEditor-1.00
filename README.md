@@ -1,1 +1,1 @@
-Download the "collectivites.csv" file as a sample.
+>> Download the "collectivites.csv" file as a sample.
