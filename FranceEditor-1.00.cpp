@@ -13,6 +13,40 @@ using namespace std;
 #include <algorithm>
 #include <map>
 #include <filesystem>
+#include <locale>
+
+std::map<std::string, std::string> errorMessages = {
+    {"FileNotFound", "\033[31m" + std::string("--> ERREUR : Fichier non trouvé.") + "\033[0m"},
+    {"FileOpeningImpossible", "\033[31m" + std::string("-->  ERREUR : Impossible d'ouvrir le fichier.") + "\033[0m"},
+    {"DataNotFound", "\033[31m" + std::string("-->  ERREUR : Données non trouvées.") + "\033[0m"},
+    {"DataAlreadyExists", "\033[31m" + std::string("-->  ERREUR : Données déjà existantes.") + "\033[0m"},
+    {"InvalidChoice", "\033[31m" + std::string("-->  ERREUR : Choix invalide.") + "\033[0m"},
+};
+
+void printErrorMessage(const std::string& errorType) {
+    if (errorMessages.count(errorType) > 0) {
+        std::cout << errorMessages[errorType] << std::endl;
+    }
+    else {
+        std::cout << "Erreur inconnue." << std::endl;
+    }
+}
+
+std::map<std::string, std::string> successMessages = {
+    {"DataSaved", "\033[32m" + std::string("--> SUCCES : Données enregistrées.") + "\033[0m"},
+    {"DataCreated", "\033[32m" + std::string("--> SUCCES : Données créées.") + "\033[0m"},
+    {"DataEdited", "\033[32m" + std::string("--> SUCCES : Données éditées.") + "\033[0m"},
+    {"DataDeleted", "\033[32m" + std::string("--> SUCCES : Données supprimées.") + "\033[0m"},
+};
+
+void printSuccessMessage(const std::string& successType) {
+    if (successMessages.count(successType) > 0) {
+        std::cout << successMessages[successType] << std::endl;
+    }
+    else {
+        std::cout << "Opération réussie." << std::endl;
+    }
+}
 
 class Collectivite {
 public:
@@ -21,6 +55,7 @@ public:
     std::string nom;
     std::string appartientA;
     std::map<std::string, int> nombreCollectivites;
+    std::vector<std::string> ordreCollectivites;
     bool affiche;
 
     Collectivite(char type, std::string code, std::string nom, std::string appartientA)
@@ -28,6 +63,31 @@ public:
 
     void ajouterTypeCollectivite(const std::string& typeCollectivite, int nombre = 0) {
         nombreCollectivites[typeCollectivite] = nombre;
+        ordreCollectivites.push_back(typeCollectivite);
+    }
+
+    void modifierTypeCollectivite(const std::string& ancienNom, const std::string& nouveauNom) {
+        auto it = nombreCollectivites.find(ancienNom);
+        if (it != nombreCollectivites.end()) {
+            int nombre = it->second;
+            nombreCollectivites.erase(it);
+            nombreCollectivites[nouveauNom] = nombre;
+            std::replace(ordreCollectivites.begin(), ordreCollectivites.end(), ancienNom, nouveauNom);
+        }
+        else {
+            printErrorMessage("DataNotFound");
+        }
+    }
+
+    void supprimerTypeCollectivite(const std::string& typeCollectivite) {
+        auto it = nombreCollectivites.find(typeCollectivite);
+        if (it != nombreCollectivites.end()) {
+            nombreCollectivites.erase(it);
+            ordreCollectivites.erase(std::remove(ordreCollectivites.begin(), ordreCollectivites.end(), typeCollectivite), ordreCollectivites.end());
+        }
+        else {
+            printErrorMessage("DataNotFound");
+        }
     }
 
     void lireCSV(const std::string& nomFichier) {
@@ -54,14 +114,41 @@ public:
     }
 
     void afficherDetails() const {
-        std::cout << "Type de collectivité : " << type << std::endl;
-        std::cout << "Code de la collectivité : " << code << std::endl;
-        std::cout << "Nom de la collectivité : " << nom << std::endl;
-        std::cout << "Appartient à : " << appartientA << std::endl;
-        for (const auto& pair : nombreCollectivites) {
-            std::cout << "Nombre de " << pair.first << " : " << pair.second << std::endl;
+        std::cout << "  Type de collectivité : " << type << std::endl;
+        std::cout << "  Code de la collectivité : " << code << std::endl;
+        std::cout << "  Nom de la collectivité : " << nom << std::endl;
+        std::cout << "  Appartient à : " << appartientA << std::endl;
+        for (const auto& key : ordreCollectivites) {
+            std::cout << "  " << key << " : " << nombreCollectivites.at(key) << std::endl;
         }
         std::cout << std::endl;
+    }
+
+    static void enregistrerDansCSV(const std::vector<Collectivite>& listeCollectivites, const std::string& nomFichier) {
+        std::ofstream fichier(nomFichier);
+        if (!fichier.is_open()) {
+            printErrorMessage("FileOpeningImpossible");
+            return;
+        }
+
+        fichier << "Type,Code,Nom,Appartient a";
+        if (!listeCollectivites.empty()) {
+            for (const auto& typeCollectivite : listeCollectivites[0].ordreCollectivites) {
+                fichier << "," << typeCollectivite;
+            }
+        }
+        fichier << "\n";
+
+        for (const auto& collectivite : listeCollectivites) {
+            fichier << collectivite.type << "," << collectivite.code << "," << collectivite.nom << "," << collectivite.appartientA;
+            for (const auto& typeCollectivite : collectivite.ordreCollectivites) {
+                fichier << "," << collectivite.nombreCollectivites.at(typeCollectivite);
+            }
+            fichier << "\n";
+        }
+
+        fichier.close();
+        printSuccessMessage("DataSaved");
     }
 };
 
@@ -92,9 +179,12 @@ void afficherCollectivites(std::vector<Collectivite>& listeCollectivites, const 
 void initialiserCollectivites(std::vector<Collectivite>& listeCollectivites, std::vector<std::string>enTete) {
     char choix;
     do {
-        std::cout << "Voulez-vous créer un tableau manuellement (M) ou à partir d'un fichier CSV (C), ou quitter (Q) ? ";
+        std::cout << "Voulez-vous créer un tableau manuellement (M) ou à partir d'un fichier CSV (C), ou retourner au menu (Q) ? ";
         std::cin >> choix;
-        if (choix == 'M' || choix == 'm' || choix == 'C' || choix == 'c' || choix == 'Q' || choix == 'q') {
+        if (choix == 'Q' || choix == 'q') {
+            return;
+        }
+        else if (choix == 'M' || choix == 'm' || choix == 'C' || choix == 'c') {
             std::cout << "Attention : cela va reinitialiser le tableau entièrement. Etes-vous sur ? (O/N) ";
             char confirmer;
             std::cin >> confirmer;
@@ -102,7 +192,7 @@ void initialiserCollectivites(std::vector<Collectivite>& listeCollectivites, std
                 listeCollectivites.clear();
                 if (choix == 'M' || choix == 'm') {
                     std::cout << "Combien de categories de collectivites voulez-vous ajouter ? ";
-                    int nbCategorieColl;
+                    int nbCategorieColl = 0;
                     std::cin >> nbCategorieColl;
                     std::vector<std::string> enTete = { "Type", "Code", "Nom", "Appartient a" };
                     for (int i = 0; i < nbCategorieColl; ++i) {
@@ -120,7 +210,8 @@ void initialiserCollectivites(std::vector<Collectivite>& listeCollectivites, std
                     }
                     fichier << "\n";
                     fichier.close();
-                    std::cout << "L'en-tête du CSV a été créé avec succès.\n";
+                    printSuccessMessage("DataCreated");
+                    return;
                 }
                 else if (choix == 'C' || choix == 'c') {
                     std::cout << "Entrez le nom du fichier CSV : ";
@@ -129,7 +220,7 @@ void initialiserCollectivites(std::vector<Collectivite>& listeCollectivites, std
                     nomFichier = nomFichier + ".csv";
                     std::ifstream fichier(nomFichier);
                     if (!fichier.is_open()) {
-                        std::cout << "Impossible d'ouvrir le fichier CSV." << std::endl;
+                        printErrorMessage("FileOpeningImpossible");
                         return;
                     }
                     std::string ligne;
@@ -164,10 +255,11 @@ void initialiserCollectivites(std::vector<Collectivite>& listeCollectivites, std
                         listeCollectivites.push_back(nouvelleCollectivite);
                     }
                     fichier.close();
+                    printSuccessMessage("DataCreated");
                     return;
                 }
                 else {
-                    std::cout << "Choix invalide. Veuillez entrer M pour une saisie manuelle ou C pour une saisie à partir d'un fichier CSV." << std::endl;
+                    printErrorMessage("InvalidChoice");
                 }
             }
         }
@@ -206,175 +298,338 @@ void recueillirInfosCollectivite(Collectivite& collectivite, const std::vector<s
 
 void mettreAJourRegions(std::vector<Collectivite>& listeCollectivites, std::vector<std::string>enTete) {
     for (auto& collectivite : listeCollectivites) {
-        if (collectivite.type == 'R') { // Si la collectivité est une région
+        if (collectivite.type == 'R') {
             int total = 0;
             for (const auto& autreCollectivite : listeCollectivites) {
-                if (autreCollectivite.type == 'D' && autreCollectivite.appartientA == collectivite.code) { // Si c'est un département de la région
+                if (autreCollectivite.type == 'D' && autreCollectivite.appartientA == collectivite.code) {
                     total += 1;
                 }
             }
-            collectivite.nombreCollectivites["Dep"] = total; // Mettre à jour le nombre de départements de la région
+            collectivite.nombreCollectivites["Dep"] = total;
         }
     }
 }
 
-void creerCollectivite(std::vector<Collectivite>& listeCollectivites, const std::vector<std::string>& enTete) {
-    char type;
-    std::string code;
-    std::string nom;
-    std::string appartientA;
-    Collectivite nouvelleCollectivite(type, code, nom, appartientA);
-    recueillirInfosCollectivite(nouvelleCollectivite, enTete);
-    listeCollectivites.push_back(nouvelleCollectivite);
-    std::cout << "Nouvelle collectivité créée : " << nom << std::endl;
-    mettreAJourRegions(listeCollectivites, enTete);
+
+void saisirCode(std::string& code1) {
+    std::cout << "Saisissez le code de la collectivité : ";
+    std::cin >> code1;
 }
 
-void editerCollectivite(std::vector<Collectivite>& listeCollectivites, const std::vector<std::string>& enTete) {
-    std::string code;
-    std::cout << "Saisissez le code de la collectivité à éditer : ";
-    std::cin >> code;
-    for (auto& collectivite : listeCollectivites) {
-        if (collectivite.code == code) {
-            recueillirInfosCollectivite(collectivite, enTete);
-            std::cout << "Collectivité éditée avec succès !" << std::endl;
-            mettreAJourRegions(listeCollectivites, enTete);
+int trouverCollectivite(const std::vector<Collectivite>& listCommunity, const std::string& code1) {
+    for (size_t i = 0; i < listCommunity.size(); ++i) {
+        if (listCommunity[i].code == code1) return i;
+    }
+    return -1;
+}
+
+void gererCollectivite(std::vector<Collectivite>& listCommunity, std::vector<std::string>& enTete, std::string op) {
+    std::string code1, code2;
+    int index;
+
+    if (op == "add") {
+        Collectivite nouvelleCollectivite('R', code1, "", "");
+        recueillirInfosCollectivite(nouvelleCollectivite, enTete);
+        listCommunity.push_back(nouvelleCollectivite);
+        printSuccessMessage("DataCreated");
+        mettreAJourRegions(listCommunity, enTete);
+    }
+    else if (op == "edit" || op == "delete") {
+        saisirCode(code1);
+        index = trouverCollectivite(listCommunity, code1);
+
+        if (index == -1) {
+            printErrorMessage("DataNotFound");
             return;
         }
+
+        if (op == "edit") {
+            recueillirInfosCollectivite(listCommunity[index], enTete);
+            printSuccessMessage("DataEdited");
+        }
+        else {
+            listCommunity.erase(listCommunity.begin() + index);
+            printSuccessMessage("DataDeleted");
+        }
+
+        mettreAJourRegions(listCommunity, enTete);
     }
-    std::cout << "Collectivité introuvable." << std::endl;
+    else if (op == "merge") {
+        std::cout << "Saisissez le code de la première collectivité à fusionner : ";
+        std::cin >> code1;
+        std::cout << "Saisissez le code de la deuxième collectivité à fusionner : ";
+        std::cin >> code2;
+        int index1 = -1, index2 = -1;
+        for (size_t i = 0; i < listCommunity.size(); ++i) {
+            if (listCommunity[i].code == code1) {
+                index1 = i;
+            }
+            else if (listCommunity[i].code == code2) {
+                index2 = i;
+            }
+        }
+
+
+        if (index1 != -1 && index2 != -1) {
+            for (const auto& pair : listCommunity[index2].nombreCollectivites) {
+                listCommunity[index1].nombreCollectivites[pair.first] += pair.second;
+            }
+            listCommunity.erase(listCommunity.begin() + index2);
+            std::cout << "Collectivités fusionnées avec succès !" << std::endl;
+        }
+        else {
+            std::cout << "Une ou les deux collectivités sont introuvables." << std::endl;
+        }
+
+        mettreAJourRegions(listCommunity, enTete);
+    }
 }
 
-void fusionnerCollectivite(std::vector<Collectivite>& listeCollectivites, std::vector<std::string>enTete) {
-    std::string code1, code2;
-    std::cout << "Saisissez le code de la première collectivité à fusionner : ";
-    std::cin >> code1;
-    std::cout << "Saisissez le code de la deuxième collectivité à fusionner : ";
-    std::cin >> code2;
+void gererTypeCollectivite(std::vector<Collectivite>& listCommunity, std::vector<std::string>& enTete, std::string op) {
+    std::string nom, input;
+    if (op == "add") {
+        std::cout << "Entrez le nom du type de collectivité à ajouter : ";
+        std::cin >> nom;
+        for (auto& collectivite : listCommunity) {
+            collectivite.ajouterTypeCollectivite(nom);
+        }
+        printSuccessMessage("DataCreated");
+    }
+    else if (op == "edit") {
+        std::cout << "Entrez le nom actuel du type de collectivité à éditer : ";
+        std::cin >> input;
+        std::cout << "Entrez le nouveau nom pour ce type de collectivité : ";
+        std::cin >> nom;
+        for (auto& collectivite : listCommunity) {
+            collectivite.modifierTypeCollectivite(input, nom);
+        }
+        printSuccessMessage("DataEdited");
+    }
+    else if (op == "delete") {
+        std::cout << "Entrez le nom du type de collectivité à supprimer : ";
+        std::cin >> nom;
+        for (auto& collectivite : listCommunity) {
+            collectivite.supprimerTypeCollectivite(nom);
+        }
+        printSuccessMessage("DataDeleted");
+    }
+}
 
-    int index1 = -1, index2 = -1;
+
+/*
+void saisirCode(std::string& code1) {
+    std::cout << "Saisissez le code de la collectivité : ";
+    std::cin >> code1;
+}
+
+int trouverCollectivite(const std::vector<Collectivite>& listeCollectivites, const std::string& code1) {
     for (size_t i = 0; i < listeCollectivites.size(); ++i) {
         if (listeCollectivites[i].code == code1) {
-            index1 = i;
-        }
-        else if (listeCollectivites[i].code == code2) {
-            index2 = i;
+            return i;
         }
     }
-
-    if (index1 != -1 && index2 != -1) {
-        for (const auto& pair : listeCollectivites[index2].nombreCollectivites) {
-            listeCollectivites[index1].nombreCollectivites[pair.first] += pair.second;
-        }
-        listeCollectivites.erase(listeCollectivites.begin() + index2);
-        std::cout << "Collectivités fusionnées avec succès !" << std::endl;
-    }
-    else {
-        std::cout << "Une ou les deux collectivités sont introuvables." << std::endl;
-    }
+    return -1;
 }
 
-void supprimerCollectivite(std::vector<Collectivite>& listeCollectivites, const std::vector<std::string>& enTete) {
-    std::string code;
-    std::cout << "Saisissez le code de la collectivité à supprimer : ";
-    std::cin >> code;
-    for (size_t i = 0; i < listeCollectivites.size(); ++i) {
-        if (listeCollectivites[i].code == code) {
-            listeCollectivites.erase(listeCollectivites.begin() + i);
-            std::cout << "Collectivité supprimée avec succès !" << std::endl;
+void gererCollectivite(std::vector<Collectivite>& listeCollectivites, std::vector<std::string>& enTete, std::string operation) {
+    //std::string code;
+    std::string code1, code2;
+    int index;
+
+    if (operation == "add") {
+        char type = 'R';
+        //std::string code;
+        std::string nom;
+        std::string appartientA;
+        Collectivite nouvelleCollectivite(type, code1, nom, appartientA);
+        recueillirInfosCollectivite(nouvelleCollectivite, enTete);
+        listeCollectivites.push_back(nouvelleCollectivite);
+        printSuccessMessage("DataCreated");
+        mettreAJourRegions(listeCollectivites, enTete);
+    }
+    else if (operation == "edit" || operation == "delete") {
+        saisirCode(code1);
+        index = trouverCollectivite(listeCollectivites, code1);
+
+        if (index == -1) {
+            printErrorMessage("DataNotFound");
             return;
         }
+
+        if (operation == "edit") {
+            recueillirInfosCollectivite(listeCollectivites[index], enTete);
+            printSuccessMessage("DataEdited");
+        }
+        else if (operation == "delete") {
+            listeCollectivites.erase(listeCollectivites.begin() + index);
+            printSuccessMessage("DataDeleted");
+        }
+
+        mettreAJourRegions(listeCollectivites, enTete);
     }
-    std::cout << "Collectivité introuvable." << std::endl;
-    mettreAJourRegions(listeCollectivites, enTete);
+    else if (operation == "merge") {
+        //std::string code1, code2;
+        std::cout << "Saisissez le code de la première collectivité à fusionner : ";
+        std::cin >> code1;
+        std::cout << "Saisissez le code de la deuxième collectivité à fusionner : ";
+        std::cin >> code2;
+
+        int index1 = -1, index2 = -1;
+        for (size_t i = 0; i < listeCollectivites.size(); ++i) {
+            if (listeCollectivites[i].code == code1) {
+                index1 = i;
+            }
+            else if (listeCollectivites[i].code == code2) {
+                index2 = i;
+            }
+        }
+    }
 }
 
-int compteurFichier = 1;
-
-void enregistrerDansFichierCSV(const std::vector<Collectivite>& listeCollectivites, std::vector<std::string>enTete) {
-    //std::string nomFichier = "nouvelles_collectivites_" + std::to_string(compteurFichier) + ".csv";
-    std::string nomFichier;
-    std::cout << "Entrez le nom du fichier pour enregistrer : ";
-    std::cin >> nomFichier;
-    nomFichier += nomFichier + ".csv";
-    std::ofstream fichier(nomFichier);
-    if (!fichier.is_open()) {
-        std::cout << "Impossible d'ouvrir le fichier CSV." << std::endl;
-        return;
-    }
-    fichier << "Type,Code,Nom,AppartientA,Dep,Arr,EPCI,Cant,Comm\n";
-    for (const auto& collectivite : listeCollectivites) {
-        fichier << collectivite.type << ','
-            << collectivite.code << ','
-            << collectivite.nom << ','
-            << collectivite.appartientA << ',';
-        for (const auto& pair : collectivite.nombreCollectivites) {
-            fichier << pair.second << ',';
+void gererTypeCollectivite(std::vector<Collectivite>& listeCollectivites, std::vector<std::string>& enTete, std::string operation) {
+    std::string nom;
+    std::string input;
+    if (operation == "add") {
+        std::cout << "Entrez le nom du type de collectivité à ajouter : ";
+        std::cin >> nom;
+        for (auto& collectivite : listeCollectivites) {
+            collectivite.ajouterTypeCollectivite(nom);
         }
-        fichier << '\n';
+        printSuccessMessage("DataCreated");
     }
-    fichier.close();
-    std::cout << "Les données ont été enregistrées dans le fichier '" << nomFichier << "'." << std::endl;
-    compteurFichier++;
+    else if (operation == "edit") {
+        std::cout << "Entrez le nom actuel du type de collectivité à éditer : ";
+        std::cin >> input;
+        std::cout << "Entrez le nouveau nom pour ce type de collectivité : ";
+        std::cin >> nom;
+        for (auto& collectivite : listeCollectivites) {
+            collectivite.modifierTypeCollectivite(input, nom);
+        }
+        printSuccessMessage("DataEdited");
+    }
+    else if (operation == "delete") {
+        std::cout << "Entrez le nom du type de collectivité à supprimer : ";
+        std::cin >> nom;
+        for (auto& collectivite : listeCollectivites) {
+            collectivite.supprimerTypeCollectivite(nom);
+        }
+        printSuccessMessage("DataDeleted");
+    }
+}*/
+
+void afficherAide() {
+    std::cout << "\n  Programme de visualisation et d'édition des collectivités territoriales\n\n";
+    std::cout << "  Détail des options du MENU\n\n";
+    std::cout << "  Option  1 : A chaque DEMARRAGE du programme, il faut au préalable créer un tableau des collectivités.\n";
+    std::cout << "  Option  2 : Il est possible d'afficher soit une, soit plusieurs collectivités.\n";
+    std::cout << "  Option  3 : Le programme ne peut créer que 2 niveaux détaillés de collectivités, R ou D.\n";
+    std::cout << "  Option  4 : L'édition de collectivité ne modifie que les nombres.\n";
+    std::cout << "  Option  5 : La fusion de collectivité se fait en additionnant les nombres.\n";
+    std::cout << "  Option  6 : La suppression met à jour le tableau après soustraction des nombres.\n";
+    std::cout << "  Option  7 : L'ajout du TYPE de collectivité place une nouvelle colonne en fin de tableau.\n";
+    std::cout << "  Option  8 : L'édition du TYPE de collectivité modifie le nom pour toutes les collectivités du tableau.\n";
+    std::cout << "  Option  9 : La suppression du TYPE de collectivité fait disparaître son nom et ses nombres associés.\n";
+    std::cout << "  Option 10 : L'enregistrement est suggéré sous un nouveau nom pour ne pas écraser un fichier existant.\n";
+    std::cout << "  Option 11 : Affichage de l'aide actuelle...\n";
+    std::cout << "  Option 12 : Cette option quitte le programme et perd les modifications non-enregistrées dans un fichier !\n\n";
+}
+
+void quine() {
+    std::ifstream file(__FILE__);
+    std::string line;
+
+    while (std::getline(file, line)) {
+        std::cout << line << std::endl;
+    }
 }
 
 int main() {
+    std::locale::global(std::locale(""));
     std::vector<Collectivite> listeCollectivites;
     std::vector<std::string>enTete;
-    initialiserCollectivites(listeCollectivites, enTete);
-    int option;
+    int option = 1;
+    std::string op;
     std::string input;
+    std::string separateur = "       ---------------------------------------       \n";
 
     while (true) {
-        std::cout << "---------------------------------------------------\n";
-        std::cout << "Menu :\n";
-        std::cout << "  1 - Afficher les détails des collectivités\n";
-        std::cout << "  2 - Créer une collectivité\n";
-        std::cout << "  3 - Éditer une collectivité\n";
-        std::cout << "  4 - Fusionner des collectivités\n";
-        std::cout << "  5 - Supprimer une collectivité\n";
-        std::cout << "  6 - Enregistrer les données dans un fichier .CSV\n";
-        std::cout << "  7 - Reinitialiser le tableau\n";
-        std::cout << "  8 - Quitter\n";
-        std::cout << "Choisissez une option : ";
+        std::cout << "\n" << separateur;
+        std::cout << "                       MENU                          \n";
+        std::cout << separateur;
+        std::cout << "  1  - INITIALISER un tableau des collectivités\n";
+        std::cout << separateur;
+        std::cout << "  2  - AFFICHER les détails des collectivités\n";
+        std::cout << "  3  -    Créer une collectivité\n";
+        std::cout << "  4  -    Éditer une collectivité\n";
+        std::cout << "  5  -    Fusionner des collectivités\n";
+        std::cout << "  6  -    Supprimer une collectivité\n";
+        std::cout << separateur;
+        std::cout << "  7  -    Ajouter un type de collectivité\n";
+        std::cout << "  8  -    Editer un type de collectivité\n";
+        std::cout << "  9  -    Supprimer un type de collectivité\n";
+        std::cout << separateur;
+        std::cout << "  10 - ENREGISTRER les données dans un fichier .CSV\n";
+        std::cout << separateur;
+        std::cout << "  11 - AIDE\n";
+        std::cout << "  12 - QUITTER\n";
+        std::cout << separateur;
+        std::cout << "  Choisissez une option : ";
         std::cin >> option;
         std::cin.ignore();
+        std::cout << separateur;
 
         switch (option) {
         case 1:
+            initialiserCollectivites(listeCollectivites, enTete);
+            break;
+        case 2:
             std::cout << "Entrez R pour les régions, D pour les départements, T pour tous, ou le code d'une collectivité spécifique : ";
             std::cin >> input;
-            std::cout << "---------------------------------------------------\n";
-            if (input == "R" || input == "D" || input == "T") {
+            std::cout << separateur;
+            if (input == "R" || input == "r" || input == "D" || input == "d" || input == "T" || input == "t") {
                 afficherCollectivites(listeCollectivites, "", input[0]);
             }
             else {
                 afficherCollectivites(listeCollectivites, input, 'T');
             }
             break;
-        case 2:
-            creerCollectivite(listeCollectivites, enTete);
-            break;
         case 3:
-            editerCollectivite(listeCollectivites, enTete);
+            gererCollectivite(listeCollectivites, enTete, "add");
             break;
         case 4:
-            fusionnerCollectivite(listeCollectivites, enTete);
+            gererCollectivite(listeCollectivites, enTete, "edit");
             break;
         case 5:
-            supprimerCollectivite(listeCollectivites, enTete);
+            gererCollectivite(listeCollectivites, enTete, "merge");
             break;
         case 6:
-            enregistrerDansFichierCSV(listeCollectivites, enTete);
+            gererCollectivite(listeCollectivites, enTete, "delete");
             break;
         case 7:
-            initialiserCollectivites(listeCollectivites, enTete);
+            gererTypeCollectivite(listeCollectivites, enTete, "add");
             break;
         case 8:
+            gererTypeCollectivite(listeCollectivites, enTete, "edit");
+            break;
+        case 9:
+            gererTypeCollectivite(listeCollectivites, enTete, "delete");
+            break;
+        case 10:
+            std::cout << "Entrez le nom du fichier CSV dans lequel vous voulez enregistrer les données : ";
+            std::cin >> input;
+            Collectivite::enregistrerDansCSV(listeCollectivites, input + ".csv");
+            break;
+        case 11:
+            afficherAide();
+            break;
+        case 12:
             return 0;
+        case 13:
+            quine();
+            break;
+
         default:
-            std::cout << "Option non reconnue. Veuillez réessayer.\n";
+            printErrorMessage("InvalidChoice");
         }
     }
-    return 0;
 }
